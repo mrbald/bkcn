@@ -1,23 +1,7 @@
-'''
-Copyright 2017 Vladimir Lysyy (mrbald@github)
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-'''
-
 """
-A web-socket connector to bitfinex.com
+A web-socket connector to bitmex.com
 
-API docs: https://bitfinex.readme.io/v2/docs/ws-general/
+API docs: https://www.bitmex.com/app/wsAPI/
 Coroutines spec: https://www.python.org/dev/peps/pep-0492/
 Coroutines tutorial: http://stackabuse.com/python-async-await-tutorial/
 """
@@ -27,11 +11,12 @@ import websockets
 import logging
 import json
 import time
+import dateutil.parser
 
 from collections import namedtuple, defaultdict
 from recordclass import recordclass
 
-PerKind = recordclass('PerKind', ('ticker', 'trades', 'book'))
+PerKind = recordclass('PerKind', ('quote', 'trade', 'orderBookL2'))
 PrimeRec = recordclass('PrimeRec', ('ids', 'subs'))
 HandlerRec = recordclass('HandlingRec', ('handler', 'state', 'listeners'))
 
@@ -40,13 +25,13 @@ fq = namedtuple('fq', ('b', 'a'))  # full quote (bid + ask)
 tr = namedtuple('tr', ('t', 'p', 'q'))  # trade
 
 class Gateway:
-    id = 'BFX'
+    id = 'BMX'
     ping = {'event': 'ping'}
     sock = None
     primed = defaultdict(PrimeRec)
     handlers = defaultdict(HandlerRec)
 
-    def __init__(self, uri='wss://api.bitfinex.com/ws/2', loop = asyncio.get_event_loop(), tob=True, trd=True, dob=False):
+    def __init__(self, uri = 'wss://www.bitmex.com/realtime', loop = asyncio.get_event_loop(), tob=True, trd=True, dob=False):
         assert tob or trd or dob
 
         self.logger = logging.getLogger(self.id)
@@ -77,7 +62,8 @@ class Gateway:
 
     async def __aenter__(self):
         await self.start()
-        asyncio.ensure_future(self.__dispatch(), loop=self.loop)
+        self.dispatcher = self.__dispatch()
+        asyncio.ensure_future(self.dispatcher, loop=self.loop)
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
@@ -85,25 +71,30 @@ class Gateway:
 
     async def prime(self, symbol):
         if symbol not in self.primed:
-            topic = 't%s' % symbol
+            topic = symbol
             self.logger.info("priming %s (%s)", symbol, topic)
 
             self.primed[symbol] = PrimeRec(ids=PerKind(None, None, None), subs=PerKind(list(),list(),list()))
 
+            commands = list()
+            request = {'op': 'subscribe', 'args': commands}
+
             if self.tob:
-                chan = 'ticker'
+                chan = 'quote'
                 self.logger.info("priming top of book %s (%s:%s)", symbol, chan, topic)
-                await self.__send({'event': 'subscribe', 'channel': chan, 'symbol': topic})
+                commands.append('{}:{}'.format(chan, symbol))
 
             if self.trd:
-                chan = 'trades'
+                chan = 'trade'
                 self.logger.info("priming %s (%s:%s)", symbol, chan, topic)
-                await self.__send({'event': 'subscribe', 'channel': chan, 'symbol': topic})
+                commands.append('{}:{}'.format(chan, symbol))
 
             if self.dob:
-                chan = 'book'
+                chan = 'orderBookL2'
                 self.logger.info("priming depth of book %s (%s:%s)", symbol, chan, topic)
-                await self.__send({'event': 'subscribe', 'channel': chan, 'symbol': topic, 'prec': 'P0', 'freq': 'F0', 'len': 25})
+                commands.append('{}:{}'.format(chan, symbol))
+
+            await self.__send(request)
 
     async def __send(self, msg):
         return await self.sock.send(json.dumps(msg))
@@ -115,8 +106,6 @@ class Gateway:
             return None
 
     async def sub(self, symbol, qh=None, th=None, bh=None):
-        # TODO: VL: initial snapshot
-
         if qh or th or bh:
             self.logger.info('subscribing to %s', symbol)
             if symbol not in self.primed:
@@ -133,9 +122,9 @@ class Gateway:
                 lst[pos] = val
                 return pos
 
-            qp = place(subs.ticker, qh) if qh else None
-            tp = place(subs.trades, th) if th else None
-            bp = place(subs.book, bh) if bh else None
+            qp = place(subs.quote, qh) if qh else None
+            tp = place(subs.trade, th) if th else None
+            bp = place(subs.orderBookL2, bh) if bh else None
 
             return symbol, PerKind(qp, tp, bp)
         else:
@@ -145,12 +134,12 @@ class Gateway:
         self.logger.info('dropping %s', key)
         symbol, ids = key
         rec = self.primed[symbol]
-        if ids.ticker is not None:
-            rec.subs.ticker[ids.ticker] = None
-        if ids.trades is not None:
-            rec.subs.trades[ids.trades] = None
-        if ids.book is not None:
-            rec.subs.book[ids.book] = None
+        if ids.quote is not None:
+            rec.subs.quote[ids.quote] = None
+        if ids.trade is not None:
+            rec.subs.trade[ids.trade] = None
+        if ids.orderBookL2 is not None:
+            rec.subs.orderBookL2[ids.orderBookL2] = None
         # TODO: VL: reference counted venue side sub/drop
 
     @staticmethod
@@ -158,14 +147,12 @@ class Gateway:
         return int(time.time() * 1e6)
 
     def __make_handler(self, pair, kind):
-        if kind == 'ticker':
+        if kind == 'quote':
             def handler(st, msg, listeners):
-                now = self.stamp()
-                bid, bid_sz, ask, ask_sz, _, _, _, _, _, _ = msg[1]
-                self.logger.debug('TICK %s: %g@%gx%g@%g', pair, bid_sz, bid, ask_sz, ask)
-
-                xxx = fq(sq(now, bid, bid_sz), sq(now, ask, ask_sz))
-
+                now = int(dateutil.parser.parse(msg['timestamp']).timestamp() * 1e6)
+                xxx = fq(sq(now, float(msg['bidPrice']), float(msg['bidSize'])),
+                         sq(now, float(msg['askPrice']), float(msg['askSize'])))
+                self.logger.info(xxx)
                 if st is None:
                     next_st = xxx
                     evt = next_st
@@ -185,20 +172,17 @@ class Gateway:
 
                 return next_st
 
-        elif kind == 'trades':
+        elif kind == 'trade':
             def handler(st, msg, listeners):
-                now = self.stamp()
-                leg = msg[1]
-                if leg == 'te':
-                    _, _, qty, px = msg[2]
-                    self.logger.debug('TRADE %s: %g@%g', pair, qty, px)
-                    next_st = evt = tr(now, px, qty)
-                    for listener in listeners:
-                        if listener:
-                            listener(next_st, evt)
-                    return next_st
+                now = int(dateutil.parser.parse(msg['timestamp']).timestamp() * 1e6)
 
-        elif kind == 'book':
+                next_st = evt = tr(now, float(msg['size']), float(msg['price']))
+                for listener in listeners:
+                    if listener:
+                        listener(next_st, evt)
+                return next_st
+
+        elif kind == 'orderBookL2':
             bids = dict()
             asks = dict()
 
@@ -235,10 +219,8 @@ class Gateway:
 
         return handler
 
-    def __subscribed(self, resp):
-        chan_id = resp['chanId']
-        kind = resp['channel']
-        pair = resp['pair']
+    def __subscribed(self, chan_id, kind, pair):
+        self.logger.info('subscribed to %s', chan_id)
 
         prime_rec = self.primed[pair]
         setattr(prime_rec.ids, kind, chan_id)
@@ -256,14 +238,28 @@ class Gateway:
                 self.logger.info("reader terminated")
                 break;
 
-            if isinstance(resp, list):
-                if resp[1] != 'hb':
-                    chan_id = resp[0]
-                    handler_rec = self.handlers[chan_id]
-                    handler_rec.state = handler_rec.handler(handler_rec.state, resp, handler_rec.listeners)
-            elif isinstance(resp, dict):
-                if 'event' in resp and resp['event'] == 'subscribed':
-                    self.__subscribed(resp)
+            if isinstance(resp, dict):
+                logging.info('map: %s', resp)
+                if 'table' in resp:
+                    kind = resp['table']
+                    if 'data' in resp:
+                        for msg in resp['data']:
+                            if 'symbol' in msg:
+                                symbol = msg['symbol']
+                                chan_id = '{}:{}'.format(kind, symbol);
+                                self.logger.info('looking up %s', chan_id)
+                                if chan_id not in self.handlers:
+                                    self.logger.info('not found, registering subscription %s', chan_id)
+                                    self.__subscribed(chan_id, kind=kind, pair=symbol)
+                                handler_rec = self.handlers[chan_id]
+                                handler_rec.state = handler_rec.handler(handler_rec.state, msg, handler_rec.listeners)
+                elif 'success' in resp:
+                    if bool(resp['success']):
+                        if chan_id not in self.handlers:
+                            chan_id = resp['subscribe']
+                            kind, pair = chan_id.split(':')
+                            self.__subscribed(chan_id, kind=kind, pair=pair)
+                    else:
+                        self.logger.warning('subscription failed: %s', resp)
                 else:
                     self.logger.warning('unexpected response: %s', resp)
-                logging.info('map: %s', resp)

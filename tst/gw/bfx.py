@@ -8,20 +8,11 @@ from ...fw import log
 # https://stackoverflow.com/a/23642269/267482
 # https://stackoverflow.com/a/23036785/267482
 # https://stackoverflow.com/a/5929165/267482
-def async_test(loop):
-    def decorator(func):
-        def wrapper(*args, **kwargs):
-            loop.run_until_complete(asyncio.coroutine(func)(*args, **kwargs))
-        return wrapper
-    return decorator
-
 class BfxTest(unittest.TestCase):
     def setUp(self):
-        logging.info("test set up")
         self.loop = asyncio.new_event_loop()
 
     def tearDown(self):
-        logging.info("test tear down")
         if self.loop.is_running():
             self.loop.stop()
 
@@ -50,6 +41,17 @@ class BfxTest(unittest.TestCase):
         logging.info("running test coroutine")
         self.loop.run_until_complete(snippet())
         logging.info("test coroutine done")
+
+def configureLogging():
+    print("configuring console logger")
+    root = logging.getLogger()
+    root.setLevel(logging.DEBUG)
+    ch = logging.StreamHandler()
+    ch.setLevel(logging.DEBUG)
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    ch.setFormatter(formatter)
+    root.addHandler(ch)
+
 
 # should be run with pwd=.../sandbox/ for relative imports to work
 if __name__ == '__main__':
