@@ -1,8 +1,8 @@
 import asyncio
 import logging
 
-from bkcn.gw import bmx
-from bkcn.fw import log
+from gw import bmx
+from fw import log
 
 subs = list()
 

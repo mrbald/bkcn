@@ -24,12 +24,13 @@ Coroutines tutorial: http://stackabuse.com/python-async-await-tutorial/
 
 import asyncio
 import websockets
-import logging
 import json
 import time
 
 from collections import namedtuple, defaultdict
 from recordclass import recordclass
+
+from fw import log
 
 PerKind = recordclass('PerKind', ('ticker', 'trades', 'book'))
 PrimeRec = recordclass('PrimeRec', ('ids', 'subs'))
@@ -49,7 +50,7 @@ class Gateway:
     def __init__(self, uri='wss://api.bitfinex.com/ws/2', loop = asyncio.get_event_loop(), tob=True, trd=True, dob=False):
         assert tob or trd or dob
 
-        self.logger = logging.getLogger(self.id)
+        self.logger = log.logger(self.id)
         self.uri = uri
         self.loop = loop
         self.tob = tob
@@ -61,12 +62,12 @@ class Gateway:
         self.sock = await websockets.connect(uri=self.uri, loop=self.loop)
 
         greeting = await self.__recv()
-        logging.info('connected %s', greeting)
+        self.logger.info('connected %s', greeting)
 
     async def ping(self):
         await self.__send(self.ping)
         pong = await self.__recv()
-        logging.info('received %s', pong)
+        self.logger.info('received %s', pong)
 
     async def stop(self):
         if self.sock:
@@ -266,4 +267,4 @@ class Gateway:
                     self.__subscribed(resp)
                 else:
                     self.logger.warning('unexpected response: %s', resp)
-                logging.info('map: %s', resp)
+                self.logger.debug('map: %s', resp)

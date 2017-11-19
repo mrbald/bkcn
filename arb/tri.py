@@ -1,8 +1,10 @@
+#!/bin/env python3
+
 import asyncio
 import logging
 
-from bkcn.gw import bfx
-from bkcn.fw import log
+from gw import bfx
+from fw import log
 
 tops = dict()
 subs = list()

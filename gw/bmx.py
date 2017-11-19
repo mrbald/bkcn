@@ -8,13 +8,14 @@ Coroutines tutorial: http://stackabuse.com/python-async-await-tutorial/
 
 import asyncio
 import websockets
-import logging
 import json
 import time
 import dateutil.parser
 
 from collections import namedtuple, defaultdict
 from recordclass import recordclass
+
+from fw import log
 
 PerKind = recordclass('PerKind', ('quote', 'trade', 'orderBookL2'))
 PrimeRec = recordclass('PrimeRec', ('ids', 'subs'))
@@ -34,7 +35,7 @@ class Gateway:
     def __init__(self, uri = 'wss://www.bitmex.com/realtime', loop = asyncio.get_event_loop(), tob=True, trd=True, dob=False):
         assert tob or trd or dob
 
-        self.logger = logging.getLogger(self.id)
+        self.logger = log.logger(self.id)
         self.uri = uri
         self.loop = loop
         self.tob = tob
@@ -46,12 +47,12 @@ class Gateway:
         self.sock = await websockets.connect(uri=self.uri, loop=self.loop)
 
         greeting = await self.__recv()
-        logging.info('connected %s', greeting)
+        self.logger.info('connected %s', greeting)
 
     async def ping(self):
         await self.__send(self.ping)
         pong = await self.__recv()
-        logging.info('received %s', pong)
+        self.logger.info('received %s', pong)
 
     async def stop(self):
         if self.sock:
@@ -152,7 +153,8 @@ class Gateway:
                 now = int(dateutil.parser.parse(msg['timestamp']).timestamp() * 1e6)
                 xxx = fq(sq(now, float(msg['bidPrice']), float(msg['bidSize'])),
                          sq(now, float(msg['askPrice']), float(msg['askSize'])))
-                self.logger.info(xxx)
+                self.logger.info("xxx: %s", xxx)
+                self.logger.info("st: %s", st)
                 if st is None:
                     next_st = xxx
                     evt = next_st
@@ -163,7 +165,7 @@ class Gateway:
                     next_st = fq(xxx.b, st.a)
                     evt = fq(xxx.b, None)
                 else:
-                    next_st = (st.b, xxx.a)
+                    next_st = fq(st.b, xxx.a)
                     evt = fq(None, xxx.a)
 
                 for listener in listeners:
@@ -239,7 +241,7 @@ class Gateway:
                 break;
 
             if isinstance(resp, dict):
-                logging.info('map: %s', resp)
+                self.logger.debug('map: %s', resp)
                 if 'table' in resp:
                     kind = resp['table']
                     if 'data' in resp:

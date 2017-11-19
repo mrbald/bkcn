@@ -1,6 +1,8 @@
 import logging
 import sys
 
+def logger(name):
+    return logging.getLogger(name)
 
 def configure():
     root = logging.getLogger()
