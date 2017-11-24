@@ -2,8 +2,8 @@ import unittest
 import asyncio
 import logging
 
-from ...gw import bfx
-from ...fw import log
+from gw import bfx
+from fw import log
 
 # https://stackoverflow.com/a/23642269/267482
 # https://stackoverflow.com/a/23036785/267482
@@ -42,18 +42,8 @@ class BfxTest(unittest.TestCase):
         self.loop.run_until_complete(snippet())
         logging.info("test coroutine done")
 
-def configureLogging():
-    print("configuring console logger")
-    root = logging.getLogger()
-    root.setLevel(logging.DEBUG)
-    ch = logging.StreamHandler()
-    ch.setLevel(logging.DEBUG)
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    ch.setFormatter(formatter)
-    root.addHandler(ch)
 
-
-# should be run with pwd=.../sandbox/ for relative imports to work
+# should be run with pwd=.../bkcn/ for relative imports to work
 if __name__ == '__main__':
     log.configure()
     unittest.main()

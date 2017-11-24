@@ -2,8 +2,8 @@ import unittest
 import asyncio
 import logging
 
-from ...gw import bmx
-from ...fw import log
+from gw import bmx
+from fw import log
 
 # https://stackoverflow.com/a/23642269/267482
 # https://stackoverflow.com/a/23036785/267482
@@ -38,7 +38,5 @@ class BmxTest(unittest.TestCase):
 # should be run with pwd=.../sandbox/ for relative imports to work
 if __name__ == '__main__':
     log.configure()
-    test = BmxTest()
-    test.setUp()
-    test.runTest()
-    #unittest.main()
+    unittest.main()
+
